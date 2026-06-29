@@ -3,34 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RunJoy • GPS Tracker</title>
+    <title>RunJoy • Live GPS</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
-
+        
         body {
             font-family: 'Inter', sans-serif;
             background: #0a0a0c;
             color: #f4f4f5;
             margin: 0;
-            padding-bottom: 100px;
         }
-
         .glass {
             background: rgba(255,255,255,0.08);
             backdrop-filter: blur(16px);
             border: 1px solid rgba(255,255,255,0.1);
         }
-
-        .title { font-family: 'Space Grotesk', sans-serif; letter-spacing: -2px; }
-
-        .btn {
-            padding: 18px 24px;
-            border-radius: 9999px;
-            font-weight: 700;
-            font-size: 1.1rem;
-        }
+        .title { font-family: 'Space Grotesk', sans-serif; }
     </style>
 </head>
 <body class="max-w-md mx-auto">
@@ -38,16 +28,16 @@
         <div class="text-4xl">🏃‍♂️</div>
         <div>
             <h1 class="title text-4xl font-bold">RunJoy</h1>
-            <p class="text-orange-400 text-sm">LIVE GPS</p>
+            <p class="text-orange-400 text-xs">LIVE GPS RUN TRACKER</p>
         </div>
     </header>
 
     <div class="p-6">
-        <div id="status" class="glass rounded-3xl p-6 mb-8 text-center">
-            <div id="status-text" class="text-lg font-medium mb-2">Tap Start to begin tracking</div>
-            <div id="live-stats" class="grid grid-cols-3 gap-4 mt-6">
+        <div class="glass rounded-3xl p-6 mb-8 text-center">
+            <div id="status" class="text-lg font-medium">Ready • Tap to start</div>
+            <div class="grid grid-cols-3 gap-4 mt-8">
                 <div class="text-center">
-                    <div id="distance" class="text-4xl font-bold text-orange-400">0.00</div>
+                    <div id="dist" class="text-4xl font-bold text-orange-400">0.00</div>
                     <div class="text-xs text-zinc-400">KM</div>
                 </div>
                 <div class="text-center">
@@ -55,151 +45,96 @@
                     <div class="text-xs text-zinc-400">PACE</div>
                 </div>
                 <div class="text-center">
-                    <div id="timer" class="text-4xl font-bold">00:00</div>
+                    <div id="time" class="text-4xl font-bold">00:00</div>
                     <div class="text-xs text-zinc-400">TIME</div>
                 </div>
             </div>
         </div>
 
-        <div id="map" class="h-80 rounded-3xl border border-white/10 overflow-hidden mb-8"></div>
+        <div id="map" class="h-80 rounded-3xl border border-white/10 mb-8"></div>
 
         <div class="flex gap-4">
-            <button onclick="startTracking()" id="start-btn"
-                    class="flex-1 btn bg-red-500 hover:bg-red-600 text-white">
-                ▶️ START TRACKING
+            <button onclick="startRun()" id="startBtn" 
+                    class="flex-1 py-7 bg-red-500 hover:bg-red-600 rounded-3xl text-xl font-bold">
+                START RUN
             </button>
-            <button onclick="stopTracking()" 
-                    class="flex-1 btn glass">
-                ⏹️ STOP
+            <button onclick="stopRun()" 
+                    class="flex-1 py-7 glass rounded-3xl text-xl font-bold">
+                STOP
             </button>
         </div>
 
-        <button onclick="saveRun()" 
-                class="mt-6 w-full py-6 glass text-lg font-medium rounded-3xl">
-            💾 SAVE CURRENT RUN
+        <button onclick="saveRun()" class="mt-6 w-full py-6 glass rounded-3xl text-lg">
+            SAVE RUN
         </button>
     </div>
 
     <script>
-        let map, routeLine, watchId = null;
-        let totalDistance = 0;
-        let startTime = null;
-        let timerInterval = null;
-        let lastPos = null;
-        let isTracking = false;
+        let map, route, watchId = null;
+        let totalDist = 0, lastPos = null, startTime = null, timer = null;
+        let isRunning = false;
 
         function initMap() {
-            map = L.map('map', { zoomControl: true }).setView([37.7749, -122.4194], 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-            routeLine = L.polyline([], { color: '#f97316', weight: 7, opacity: 0.9 }).addTo(map);
+            map = L.map('map').setView([37.77, -122.42], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: ''
+            }).addTo(map);
+            route = L.polyline([], {color: '#f97316', weight: 7}).addTo(map);
         }
 
-        function haversineDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371;
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        }
+        function startRun() {
+            if (!navigator.geolocation) return alert("GPS not supported");
 
-        function startTimer() {
+            document.getElementById('startBtn').textContent = "RUNNING...";
+            isRunning = true;
             startTime = Date.now();
-            timerInterval = setInterval(() => {
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                const mins = Math.floor(elapsed / 60);
-                const secs = elapsed % 60;
-                document.getElementById('timer').textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+            timer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startTime)/1000);
+                const m = Math.floor(elapsed/60);
+                const s = elapsed % 60;
+                document.getElementById('time').textContent = `${m}:${s<10?'0':''}${s}`;
             }, 1000);
-        }
 
-        function startTracking() {
-            if (!navigator.geolocation) {
-                alert("❌ Your browser doesn't support GPS tracking");
-                return;
-            }
+            watchId = navigator.geolocation.watchPosition(pos => {
+                const {latitude, longitude} = pos.coords;
 
-            document.getElementById('start-btn').textContent = "TRACKING...";
-            document.getElementById('status-text').innerHTML = "📍 <span class='text-green-400'>LIVE</span>";
-
-            isTracking = true;
-            startTimer();
-
-            watchId = navigator.geolocation.watchPosition(
-                (position) => {
-                    const { latitude, longitude } = position.coords;
-
-                    if (lastPos) {
-                        const dist = haversineDistance(
-                            lastPos.lat, lastPos.lon,
-                            latitude, longitude
-                        );
-                        totalDistance += dist;
-                        document.getElementById('distance').textContent = totalDistance.toFixed(2);
-                    }
-
-                    lastPos = { lat: latitude, lon: longitude };
-
-                    routeLine.addLatLng([latitude, longitude]);
-                    map.flyTo([latitude, longitude], 16, { duration: 1 });
-                },
-                (error) => {
-                    let msg = "GPS Error: ";
-                    switch(error.code) {
-                        case error.PERMISSION_DENIED:
-                            msg += "Location access denied. Please allow GPS in browser settings.";
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            msg += "Location information unavailable.";
-                            break;
-                        case error.TIMEOUT:
-                            msg += "Location request timed out.";
-                            break;
-                        default:
-                            msg += "Unknown error occurred.";
-                    }
-                    document.getElementById('status-text').innerHTML = `<span class='text-red-400'>${msg}</span>`;
-                    console.error(error);
-                },
-                { 
-                    enableHighAccuracy: true,
-                    maximumAge: 0,
-                    timeout: 10000 
+                if (lastPos) {
+                    const dist = calculateDistance(lastPos.lat, lastPos.lon, latitude, longitude);
+                    totalDist += dist;
+                    document.getElementById('dist').textContent = totalDist.toFixed(2);
                 }
-            );
+
+                lastPos = {lat: latitude, lon: longitude};
+                route.addLatLng([latitude, longitude]);
+                map.flyTo([latitude, longitude], 16);
+            }, err => {
+                console.error(err);
+                alert("GPS Error: " + (err.message || "Permission denied"));
+            }, {enableHighAccuracy: true, timeout: 10000});
         }
 
-        function stopTracking() {
-            if (watchId) {
-                navigator.geolocation.clearWatch(watchId);
-                watchId = null;
-            }
-            if (timerInterval) {
-                clearInterval(timerInterval);
-            }
-            isTracking = false;
-            document.getElementById('start-btn').textContent = "▶️ START TRACKING";
-            document.getElementById('status-text').textContent = "Run stopped";
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2-lat1)*Math.PI/180;
+            const dLon = (lon2-lon1)*Math.PI/180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function stopRun() {
+            if (watchId) navigator.geolocation.clearWatch(watchId);
+            if (timer) clearInterval(timer);
+            isRunning = false;
+            document.getElementById('startBtn').textContent = "START RUN";
         }
 
         function saveRun() {
-            if (totalDistance < 0.1) {
-                alert("Run too short to save. Keep going!");
-                return;
-            }
-
-            const timeEl = document.getElementById('timer').textContent;
-            alert(`✅ Run Saved!\n\nDistance: ${totalDistance.toFixed(2)} km\nTime: ${timeEl}\n\nGreat work! 💪`);
-            
-            // Reset
-            totalDistance = 0;
-            routeLine.setLatLngs([]);
-            document.getElementById('distance').textContent = "0.00";
-            document.getElementById('timer').textContent = "00:00";
+            if (totalDist < 0.1) return alert("Run too short");
+            alert(`Run Saved!\nDistance: ${totalDist.toFixed(2)} km`);
         }
 
-        window.onload = () => {
-            initMap();
-        };
+        window.onload = initMap;
     </script>
 </body>
 </html>
